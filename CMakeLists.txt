@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(Nimble_Framework VERSION 1.0 LANGUAGES CXX)
 
-option(APP_BUILD_SHARED "Build shared library" ON)
+option(APP_BUILD_SHARED "Build shared library" OFF)
 
 # ---- standard ----
 set(CMAKE_CXX_STANDARD 23)
