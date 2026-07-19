@@ -8,7 +8,9 @@
 #include "imgui/ImGui_windowcontrol.h"
 #include <rlImGui.h>
 #include <rlgl.h>
-
+#include <string>
+#include <vector>
+#include "utils/logging.h"
 
 namespace fs = std::filesystem;
 
@@ -122,6 +124,7 @@ static void ClearDropfiles () {
 // Initializing window and generating basic structure
 void app::Init (int width, int height, const std::string& name) {
   auto &app = App::Get();
+  logging::startlogging(app.workingdir + "/logs", "run.log");
   if (app.initialized)
     return;
   app.name = name;
@@ -170,8 +173,7 @@ void app::Init (int width, int height, const std::string& name) {
   rlImGuiSetup(false);
   ImGuiIO &io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-  auto &wc = WindowControl::Get();
-  wc.LoadSettings();
+  LoadWindowControlSettings();
 }
 
 void app::Close () {
@@ -203,8 +205,7 @@ void app::Close () {
     file.write((char *)&app.settings, sizeof(app.settings));
   }
   // Closing window control
-  auto &wc = WindowControl::Get();
-  wc.SaveSettings();
+  SaveWindowControlSettings();
   CloseWindow();
 }
 
@@ -240,8 +241,7 @@ void app::BeginDrawing () {
   ImGui::DockSpace(dockspace_id, ImVec2(0, 0));
   ImGui::End();
   // Drawing all windows
-  auto &wc = WindowControl::Get();
-  wc.DrawWindows ();
+  DrawWindows();
 }
 
 void app::EndDrawing () {
@@ -251,8 +251,7 @@ void app::EndDrawing () {
   app.drawing = false;
   rlImGuiEnd();
   ::EndDrawing();
-  auto &em = EventRegistry::Get();
-  em.TriggerEvents();
+  TriggerEvents();
   ClearDropfiles();
 }
 

@@ -9,9 +9,13 @@
 #include <iomanip>
 #include <chrono>
 #include <sstream>
-#include <algorithm>
 #include <cstdio>
 #include <streambuf>
+#include <string_view>
+#ifdef _WIN32
+#include <crtdbg.h>
+#include <cstdio>
+#endif
 
 static std::string lastWarning = "";
 static std::vector<std::string> warnings;
@@ -21,12 +25,7 @@ static std::vector<std::string> infos;
 
 // Outsource to utils???
 namespace strings {
-	bool ends_with(const std::string& value, const std::string& ending) {
-		if (ending.size() > value.size()) return false;
-		return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
-	}
-	
-	std::string GetTimestamp() {
+	static std::string GetTimestamp() {
 		const auto now = std::chrono::system_clock::now();
 		std::time_t time = std::chrono::system_clock::to_time_t(now);
 		std::tm tm{};
@@ -52,32 +51,57 @@ namespace logging {
 
 	namespace fs = std::filesystem;
 	
-	void log(const std::string& type, const std::string& msg) {
+	void log(const std::string &type, const std::string &msg, const std::source_location& location){
+		const std::string filename = std::filesystem::path(location.file_name()).filename().string();
 		if (type == "[ERROR]") {
-			std::cerr << strings::GetTimestamp() << "\t" << type << "\t" << msg << "\n";
-			lastError = msg;
+			std::string fullMessage = strings::formatString(
+				"[%s:%u %s] %s",
+				filename.c_str(),
+				static_cast<unsigned>(location.line()),
+				location.function_name(),
+				msg.c_str()
+			);
+			std::cerr << strings::GetTimestamp() << "\t" << type << "\t" << fullMessage << "\n";
+			lastError = fullMessage;
 			errors.push_back(lastError);
-			infos.push_back("[ERROR] " + msg);
+			infos.push_back("[ERROR] " + fullMessage);
+			std::cout << strings::GetTimestamp() << "\t" << type << "\t" << fullMessage << "\n";
 			logfile.flush();
-			return;
 		}
 		else if (type == "[WARNING]") {
-			lastWarning = msg;
+			std::string fullMessage = strings::formatString(
+				"[%s] %s",
+				location.function_name(),
+				msg.c_str()
+			);
+			lastWarning = fullMessage;
 			warnings.push_back(lastWarning);
 			infos.push_back("[WARNING] " + msg);
+			std::cout << strings::GetTimestamp() << "\t" << type << "\t" << fullMessage << "\n";
 		}
 		else if (type == "[INFO]") {
-			infos.push_back("[INFO] " + msg);
+			std::string fullMessage = strings::formatString(
+				"[%s] %s",
+				location.function_name(),
+				msg.c_str()
+			);
+			infos.push_back("[INFO] " + fullMessage);
+			std::cout << strings::GetTimestamp() << "\t" << type << "\t" << fullMessage << "\n";
 		}
-		std::cout << strings::GetTimestamp() << "\t" << type << "\t" << msg << "\n";
 		logfile.flush();
 	}
 	void startlogging(const std::string& path, const std::string& filename) {
+		if (!fs::exists(path))
+			fs::create_directories(path);
+		std::ofstream file(path + "/" + filename, std::ios::app);
+		file.close();
+		//freopen((path + "/" + filename).c_str(), "w", stdout);
+		//freopen((path + "/" + filename).c_str(), "a", stderr);
 		if (fs::is_directory(path))
 			fs::create_directories(path);
 		logfilePath = path;
 		logfileName = filename;
-		logfile.open(path + filename, std::ios::out);
+		logfile.open(path + "/" + filename, std::ios::out);
 		oldOutBuf = std::cout.rdbuf();
 		oldCerrBuf = std::cerr.rdbuf();
 		std::cout.rdbuf(logfile.rdbuf());
@@ -87,29 +111,38 @@ namespace logging {
 		logfile.flush();
 		logfile.close();
 		std::cout.rdbuf(oldOutBuf);
+		std::cerr.rdbuf(oldCerrBuf);
 	}
 	void backuplog(const std::string& path, bool crash) {
 		// Check if the logfile exists
-		if (!fs::exists(logfilePath + logfileName)) {
+		if (!fs::exists(logfilePath + "/" + logfileName)) {
 			return;
 		}
 		// Create Directories
 		if (!fs::exists(path)) {
 			fs::create_directories(path);
 		}
-		// Getting amount of files in directory
-		int count = 0;
-		for (const auto& entry : fs::directory_iterator(path)) {
-			count++;
-		}
 		// Creating outfile string
-		std::string outFile = path + logfileName;
+		std::string outFile;
+		std::string timestamp = strings::GetTimestamp();
+		for (char& c : timestamp) {
+			if (c == ':')
+				c = '.';
+		}
 		if (crash)
-			outFile += "_crash";
-		outFile += "_" + std::to_string(count) + ".log";
+			outFile = path + "/crash_" + timestamp + ".txt";
+		else
+			outFile = path + "/" + logfileName + timestamp + ".txt";
+		LOG_INFO("%s", outFile.c_str());
 		// Copying logfile to desired Directory
+		std::cout.flush();
+		std::cerr.flush();
 		logfile.flush();
-		fs::copy_file(logfilePath + logfileName, outFile);
+		std::ofstream out(outFile, std::ios::binary);
+		std::ifstream in(logfilePath + "/" + logfileName, std::ios::binary);
+		out << in.rdbuf();
+		out.close();
+		in.close();
 	}
 	void deletelog(const std::string& path) {
 		std::remove(path.c_str());

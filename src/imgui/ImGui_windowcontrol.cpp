@@ -6,12 +6,43 @@
 #include <imgui.h>
 #include <string>
 #include <utility>
+#include <unordered_map>
+#include <map>
 
-void WindowControl::RegisterWindow(const std::string& name, bool open,
+class WindowControl {
+public:
+  static WindowControl& Get() {
+    static WindowControl instance;
+    return instance;
+  }
+  std::unordered_map<std::string, WindowInformation> registry;
+  std::unordered_map<std::string, PopupInformation> popupRegistry;
+  std::map<std::string, Function> menuBarRegistry;
+  std::string selectedWindow;
+  unsigned char theme = 0;
+  bool editFlagsOpen = false;
+  bool themeSelectOpen = false;
+  bool windowToggleOpen = false;
+
+public:
+  WindowControl(const WindowControl&) = delete;
+  WindowControl& operator=(const WindowControl&) = delete;
+  WindowControl(WindowControl&&) = delete;
+  WindowControl& operator=(WindowControl&&) = delete;
+
+private:
+  WindowControl() = default;
+  ~WindowControl() = default;
+};
+
+static void CheckboxFlags(const char* label, int* flags, int flag);
+
+void RegisterWindow(const std::string& name, bool open,
                                    Function function,
                                    int flags) {
-  auto it = mRegistry.find(name);
-  if (it != mRegistry.end()) {
+  auto& wc = WindowControl::Get();
+  auto it = wc.registry.find(name);
+  if (it != wc.registry.end()) {
     it->second.function = function;
     return;
   }
@@ -19,55 +50,61 @@ void WindowControl::RegisterWindow(const std::string& name, bool open,
   wi.open = open;
   wi.function = function;
   wi.flags = flags;
-  mRegistry[name] = std::move(wi);
+  wc.registry[name] = std::move(wi);
 }
 
-void WindowControl::RegisterMenu(const std::string& name,
+void RegisterMenu(const std::string& name,
                                  Function function) {
-  auto it = mMenuBarRegistry.find(name);
-  assert(it == mMenuBarRegistry.end() &&
+  auto& wc = WindowControl::Get();
+  auto it = wc.menuBarRegistry.find(name);
+  assert(it == wc.menuBarRegistry.end() &&
          "There is already a Menu registered with the same name!");
-  mMenuBarRegistry[name] = function;
+  wc.menuBarRegistry[name] = function;
 }
 
-void WindowControl::RegisterPopup (const std::string& name, bool modal, Function function) {
+void RegisterPopup (const std::string& name, bool modal, Function function) {
+  auto& wc = WindowControl::Get();
   assert(function && "nullptr Function for popup is not allowed");
   assert(!name.empty() && "Empty name is not allowed");
-  auto it = mPopupRegistry.find(name);
-  assert(it == mPopupRegistry.end() && "There is already a Popup registered with the same name!");
-  mPopupRegistry[name] = PopupInformation(modal, function);
+  auto it = wc.popupRegistry.find(name);
+  assert(it == wc.popupRegistry.end() && "There is already a Popup registered with the same name!");
+  wc.popupRegistry[name] = PopupInformation(modal, function);
 }
 
-void WindowControl::ToggleWindow(const std::string& name) {
-  auto it = mRegistry.find(name);
-  if (it == mRegistry.end())
+void ToggleWindow(const std::string& name) {
+  auto& wc = WindowControl::Get();
+  auto it = wc.registry.find(name);
+  if (it == wc.registry.end())
     return;
   it->second.open = !it->second.open;
 }
 
-void WindowControl::SetWindowState(const std::string& name, bool open) {
-  auto it = mRegistry.find(name);
-  if (it == mRegistry.end())
+void SetWindowState(const std::string& name, bool open) {
+  auto& wc = WindowControl::Get();
+  auto it = wc.registry.find(name);
+  if (it == wc.registry.end())
     return;
   it->second.open = open;
 }
 
-WindowInformation& WindowControl::GetWindowInfo(const std::string& name) {
+WindowInformation& GetWindowInfo(const std::string& name) {
+  auto& wc = WindowControl::Get();
   static WindowInformation wi;
-  auto it = mRegistry.find(name);
-  if (it == mRegistry.end())
+  auto it = wc.registry.find(name);
+  if (it == wc.registry.end())
     return wi;
   return it->second;
 }
 
-void WindowControl::DrawWindows() {
+void DrawWindows() {
+  auto& wc = WindowControl::Get();
   DrawMainMenu();
-  for (auto& [name, wi] : mRegistry) {
+  for (auto& [name, wi] : wc.registry) {
     if (!wi)
       continue;
     if (ImGui::Begin (name.c_str (), &wi.open, wi.flags)) {
       wi.function();
-			for (auto& [name, pi] : mPopupRegistry) {
+			for (auto& [name, pi] : wc.popupRegistry) {
 				if (!pi)
 					continue;
 				if (pi.modal) {
@@ -87,12 +124,13 @@ void WindowControl::DrawWindows() {
   }
 }
 
-void WindowControl::DrawMainMenu() {
+void DrawMainMenu() {
+  auto& wc = WindowControl::Get();
   ImGui::BeginMainMenuBar();
-  for (const auto& [name, function] : mMenuBarRegistry) {
+  for (const auto& [name, function] : wc.menuBarRegistry) {
     if (ImGui::BeginMenu(name.c_str())) {
       function();
-      for (auto& [name, pi] : mPopupRegistry) {
+      for (auto& [name, pi] : wc.popupRegistry) {
         if (!pi)
           continue;
         if (pi.modal) {
@@ -128,76 +166,79 @@ void WindowControl::DrawMainMenu() {
   ImGui::EndMainMenuBar();
 }
 
-void WindowControl::ToggleWindow() {
-  for (auto& [name, wi] : mRegistry) {
+void ToggleWindow() {
+  auto& wc = WindowControl::Get();
+  for (auto& [name, wi] : wc.registry) {
     if (!wi.function)
       return;
     ImGui::Checkbox(name.c_str(), &wi.open);
   }
 }
 
-void WindowControl::ThemeSelector() {
+void ThemeSelector() {
+  auto& wc = WindowControl::Get();
   if (ImGui::BeginMenu("Light Themes")) {
     if (ImGui::Button("Normal")) {
       SetTheme(LIGHT);
-      mTheme = LIGHT;
+      wc.theme = LIGHT;
     }
     if (ImGui::Button("Gold")) {
       SetTheme(GOLD_LIGHT);
-      mTheme = GOLD_LIGHT;
+      wc.theme = GOLD_LIGHT;
     }
     if (ImGui::Button("Lila")) {
       SetTheme(PURPLE_LIGHT);
-      mTheme = PURPLE_LIGHT;
+      wc.theme = PURPLE_LIGHT;
     }
     if (ImGui::Button("Braun")) {
       SetTheme(NOCTUA_LIGHT);
-      mTheme = NOCTUA_LIGHT;
+      wc.theme = NOCTUA_LIGHT;
     }
     if (ImGui::Button("Rose")) {
       SetTheme(ROSEPINE_LIGHT);
-      mTheme = ROSEPINE_LIGHT;
+      wc.theme = ROSEPINE_LIGHT;
     }
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Dark Themes")) {
     if (ImGui::Button("Normal")) {
       SetTheme(DARK);
-      mTheme = DARK;
+      wc.theme = DARK;
     }
     if (ImGui::Button("Gold")) {
       SetTheme(GOLD_DARK);
-      mTheme = GOLD_DARK;
+      wc.theme = GOLD_DARK;
     }
     if (ImGui::Button("Lila")) {
       SetTheme(PURPLE_DARK);
-      mTheme = PURPLE_DARK;
+      wc.theme = PURPLE_DARK;
     }
     if (ImGui::Button("Braun")) {
       SetTheme(NOCTUA_DARK);
-      mTheme = NOCTUA_DARK;
+      wc.theme = NOCTUA_DARK;
     }
     if (ImGui::Button("Rose")) {
       SetTheme(ROSEPINE_DARK);
-      mTheme = ROSEPINE_DARK;
+      wc.theme = ROSEPINE_DARK;
     }
     ImGui::EndMenu();
   }
 }
 
-void WindowControl::EditWindowFlags() {
-  if (ImGui::BeginCombo("Fenster Auswahl", mSelectedWindow.c_str())) {
-    for (const auto& [name, wi] : mRegistry) {
+void EditWindowFlags() {
+  auto& wc = WindowControl::Get();
+  if (ImGui::BeginCombo("Fenster Auswahl", wc.selectedWindow.c_str())) {
+    for (const auto& [name, wi] : wc.registry) {
       if (!wi.function || !wi.open)
         continue;
-      bool selected = name == mSelectedWindow;
+      bool selected = name == wc.selectedWindow;
       if (ImGui::Selectable(name.c_str(), selected))
-        mSelectedWindow = name;
+        wc.selectedWindow = name;
     }
     ImGui::EndCombo();
   }
-  auto it = mRegistry.find(mSelectedWindow);
-  if (it == mRegistry.end()) {
+  auto it = wc.registry.find(wc.selectedWindow);
+  if (it == wc.registry.end()) {
     return;
   }
 
@@ -238,7 +279,7 @@ void WindowControl::EditWindowFlags() {
   CheckboxFlags("No Inputs", &wi.flags, ImGuiWindowFlags_NoInputs);
 }
 
-void WindowControl::CheckboxFlags(const char* label, int* flags,
+static void CheckboxFlags(const char* label, int* flags,
                                   int flag) {
   bool v = (*flags & flag) != 0;
   if (ImGui::Checkbox(label, &v)) {
@@ -249,17 +290,18 @@ void WindowControl::CheckboxFlags(const char* label, int* flags,
   }
 }
 
-void WindowControl::SaveSettings() {
+void SaveWindowControlSettings() {
+  auto& wc = WindowControl::Get();
   std::ofstream file;
   file.open("windowcontrol.ini", std::ios::binary);
   if (!file)
     return;
   // Saving behavior settings
   file << "[Settings]\n";
-  file << "Theme=" << std::to_string(mTheme) << "\n";
+  file << "Theme=" << std::to_string(wc.theme) << "\n";
   file << "\n";
   // Saving each window settings
-  for (const auto& [name, wi] : mRegistry) {
+  for (const auto& [name, wi] : wc.registry) {
     if (!wi.function)
       continue;
     file << "[Window][" << name << "]\n";
@@ -270,7 +312,8 @@ void WindowControl::SaveSettings() {
   file.close();
 }
 
-void WindowControl::LoadSettings() {
+void LoadWindowControlSettings() {
+  auto& wc = WindowControl::Get();
   std::ifstream file;
   file.open("windowcontrol.ini", std::ios::binary);
   if (!file)
@@ -287,7 +330,7 @@ void WindowControl::LoadSettings() {
           line.pop_back();
         const auto& [name, value] = split_at(line, "=");
         if (name == "Theme") {
-          mTheme = static_cast<unsigned char>(std::stoi(value));
+          wc.theme = static_cast<unsigned char>(std::stoi(value));
         }
       }
     }
@@ -313,15 +356,5 @@ void WindowControl::LoadSettings() {
     }
   }
   file.close();
-  SetTheme(mTheme);
-}
-
-void WindowControl::ToggleThemeSelect() {
-  mThemeSelectOpen = !mThemeSelectOpen;
-}
-
-void WindowControl::ToggleEditFlags() { mEditFlagsOpen = !mEditFlagsOpen; }
-
-void WindowControl::ToggleWindowToggle() {
-  mWindowToggleOpen = !mWindowToggleOpen;
+  SetTheme(wc.theme);
 }

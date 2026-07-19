@@ -6,12 +6,17 @@
 #include <cstdio>
 #include <type_traits>
 #include <utility>
+#include <source_location>
+
+#define LOG_ERROR(...)\
+  logging::logerror(std::source_location::current(), __VA_ARGS__)
+#define LOG_WARNING(...)\
+  logging::logwarning(std::source_location::current(), __VA_ARGS__)
+#define LOG_INFO(...)\
+  logging::loginfo(std::source_location::current(), __VA_ARGS__)
 
 // Maybe put this into utils????
 namespace strings {
-bool ends_with(const std::string &value, const std::string &ending);
-std::string GetTimestamp();
-
 template <typename T>
 auto format_arg(T&& value) {
   if constexpr (std::is_same_v<std::decay_t<T>, std::string>)
@@ -40,21 +45,21 @@ std::string formatString(const std::string& format, Args&&... args) {
 
 namespace logging {
 // Simple log function that should not be used outside unless you want to use your own types
-void log(const std::string &type, const std::string &msg);
+void log(const std::string &type, const std::string &msg, const std::source_location& location = std::source_location::current());
 // Logs an info to the console std::cout
 template <typename... Args>
-void loginfo(const std::string &msg, Args &&...args) {
-  log("[INFO]", strings::formatString(msg, args...));
+void loginfo(const std::source_location& location, const std::string &msg, Args &&...args) {
+  log("[INFO]", strings::formatString(msg, args...), location);
 }
 // Logs a warning to the console std::cerr
 template <typename... Args>
-void logwarning(const std::string &msg, Args &&...args) {
-  log("[WARNING]", strings::formatString(msg, args...));
+void logwarning(const std::source_location& location, const std::string &msg, Args &&...args) {
+  log("[WARNING]", strings::formatString(msg, args...), location);
 }
 // Logs an error to the console std::cerr
 template <typename... Args>
-void logerror(const std::string &msg, Args &&...args) {
-  log("[ERROR]", strings::formatString(msg, args...));
+void logerror(const std::source_location& location, const std::string &msg, Args &&...args) {
+  log("[ERROR]", strings::formatString(msg, args...), location);
 }
 
 // Start logging to a file
