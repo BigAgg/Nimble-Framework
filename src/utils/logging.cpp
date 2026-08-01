@@ -22,6 +22,7 @@ static std::vector<std::string> warnings;
 static std::string lastError = "";
 static std::vector<std::string> errors;
 static std::vector<std::string> infos;
+static bool loggingstarted = false;
 
 // Outsource to utils???
 namespace strings {
@@ -50,8 +51,10 @@ namespace logging {
 	static std::streambuf* oldCerrBuf;
 
 	namespace fs = std::filesystem;
-	
-	void log(const std::string &type, const std::string &msg, const std::source_location& location){
+
+	void log(const std::string& type, const std::string& msg, const std::source_location& location) {
+		if (!loggingstarted)
+			return;
 		const std::string filename = std::filesystem::path(location.file_name()).filename().string();
 		if (type == "[ERROR]") {
 			std::string fullMessage = strings::formatString(
@@ -65,7 +68,6 @@ namespace logging {
 			lastError = fullMessage;
 			errors.push_back(lastError);
 			infos.push_back("[ERROR] " + fullMessage);
-			std::cout << strings::GetTimestamp() << "\t" << type << "\t" << fullMessage << "\n";
 			logfile.flush();
 		}
 		else if (type == "[WARNING]") {
@@ -78,19 +80,35 @@ namespace logging {
 			warnings.push_back(lastWarning);
 			infos.push_back("[WARNING] " + msg);
 			std::cout << strings::GetTimestamp() << "\t" << type << "\t" << fullMessage << "\n";
+			logfile.flush();
 		}
 		else if (type == "[INFO]") {
 			std::string fullMessage = strings::formatString(
-				"[%s] %s",
-				location.function_name(),
+				"%s",
 				msg.c_str()
 			);
 			infos.push_back("[INFO] " + fullMessage);
 			std::cout << strings::GetTimestamp() << "\t" << type << "\t" << fullMessage << "\n";
+			logfile.flush();
 		}
-		logfile.flush();
+		else if (type == "[FATAL]") {
+			std::string fullMessage = strings::formatString(
+				"[%s:%u %s] %s",
+				filename.c_str(),
+				static_cast<unsigned>(location.line()),
+				location.function_name(),
+				msg.c_str()
+			);
+			std::cerr << strings::GetTimestamp() << "\t" << type << "\t" << fullMessage << "\n";
+			logfile.flush();
+			lastError = fullMessage;
+			errors.push_back(lastError);
+			infos.push_back("[FATAL] " + fullMessage);
+			throw(std::runtime_error((type + "\t" + fullMessage).c_str()));
+		}
 	}
 	void startlogging(const std::string& path, const std::string& filename) {
+		loggingstarted = true;
 		if (!fs::exists(path))
 			fs::create_directories(path);
 		std::ofstream file(path + "/" + filename, std::ios::app);
@@ -108,6 +126,7 @@ namespace logging {
 		std::cerr.rdbuf(logfile.rdbuf());
 	}
 	void stoplogging() {
+		loggingstarted = false;
 		logfile.flush();
 		logfile.close();
 		std::cout.rdbuf(oldOutBuf);
@@ -133,7 +152,6 @@ namespace logging {
 			outFile = path + "/crash_" + timestamp + ".txt";
 		else
 			outFile = path + "/" + logfileName + timestamp + ".txt";
-		LOG_INFO("%s", outFile.c_str());
 		// Copying logfile to desired Directory
 		std::cout.flush();
 		std::cerr.flush();
@@ -160,7 +178,7 @@ namespace logging {
 	std::vector<std::string> GetWarnings() {
 		return warnings;
 	}
-	std::vector<std::string> GetAllMessages(){
+	std::vector<std::string> GetAllMessages() {
 		return infos;
 	}
 }

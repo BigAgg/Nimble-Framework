@@ -288,6 +288,10 @@ void app::DrawStartup (const std::string& filepath) {
   UnloadTexture(t);
 }
 
+void app::EnableLogging(bool enable) {
+  logging::startlogging("App/", "run.log");
+}
+
 bool app::HasDropfiles () {
   auto &app = App::Get();
   return app.dragDrop.hasDroppedFile;
