@@ -1,5 +1,6 @@
 #include "imgui/ImGui_windowcontrol.h"
 #include "imgui/ImGui_themes.h"
+#include "utils/logging.h"
 #include "utils/stringconverter.h"
 #include <cassert>
 #include <fstream>
@@ -17,6 +18,7 @@ public:
   }
   std::unordered_map<std::string, WindowInformation> registry;
   std::unordered_map<std::string, PopupInformation> popupRegistry;
+  std::pair<std::string, PopupInformation> openedPopup;
   std::map<std::string, Function> menuBarRegistry;
   std::string selectedWindow;
   unsigned char theme = 0;
@@ -71,6 +73,22 @@ void RegisterPopup (const std::string& name, bool modal, Function function) {
   wc.popupRegistry[name] = PopupInformation(modal, function);
 }
 
+void OpenPopup(const std::string& name) {
+  auto& wc = WindowControl::Get();
+  auto it = wc.popupRegistry.find(name);
+  if (it == wc.popupRegistry.end()) {
+    LOG_WARNING("Desired popup is not registered: %s", name.c_str());
+    return;
+  }
+  wc.openedPopup = std::make_pair(it->first, it->second);
+}
+
+void ClosePopup() {
+  auto& wc = WindowControl::Get();
+  wc.openedPopup = {};
+  ImGui::CloseCurrentPopup();
+}
+
 void ToggleWindow(const std::string& name) {
   auto& wc = WindowControl::Get();
   auto it = wc.registry.find(name);
@@ -99,26 +117,31 @@ WindowInformation& GetWindowInfo(const std::string& name) {
 void DrawWindows() {
   auto& wc = WindowControl::Get();
   DrawMainMenu();
+  // Handle popup
+  if (!wc.openedPopup.first.empty()) {
+    if (!ImGui::IsPopupOpen(wc.openedPopup.first.c_str())) {
+      ImGui::OpenPopup(wc.openedPopup.first.c_str());
+    }
+    bool modal = wc.openedPopup.second.modal;
+    if (modal) {
+      if (ImGui::BeginPopupModal(wc.openedPopup.first.c_str())) {
+        wc.openedPopup.second.function();
+        ImGui::EndPopup();
+      }
+    }
+    else {
+      if (ImGui::BeginPopup(wc.openedPopup.first.c_str())) {
+        wc.openedPopup.second.function();
+        ImGui::EndPopup();
+      }
+    }
+  }
+  // Handle windows
   for (auto& [name, wi] : wc.registry) {
     if (!wi)
       continue;
-    if (ImGui::Begin (name.c_str (), &wi.open, wi.flags)) {
+    if (ImGui::Begin (name.c_str (), &wi.open, wi.flags | ImGuiWindowFlags_NoFocusOnAppearing)) {
       wi.function();
-			for (auto& [name, pi] : wc.popupRegistry) {
-				if (!pi)
-					continue;
-				if (pi.modal) {
-					if (ImGui::BeginPopupModal (name.c_str ())) {
-						pi.function();
-						ImGui::EndPopup();
-					}
-				} else {
-					if (ImGui::BeginPopup (name.c_str ())) {
-						pi.function();
-						ImGui::EndPopup();
-					}
-				}
-			}
     }
     ImGui::End();
   }
@@ -130,21 +153,6 @@ void DrawMainMenu() {
   for (const auto& [name, function] : wc.menuBarRegistry) {
     if (ImGui::BeginMenu(name.c_str())) {
       function();
-      for (auto& [name, pi] : wc.popupRegistry) {
-        if (!pi)
-          continue;
-        if (pi.modal) {
-          if (ImGui::BeginPopupModal (name.c_str ())) {
-            pi.function();
-            ImGui::EndPopup();
-          }
-        } else {
-          if (ImGui::BeginPopup (name.c_str ())) {
-            pi.function();
-            ImGui::EndPopup();
-          }
-        }
-      }
       ImGui::EndMenu();
     }
   }

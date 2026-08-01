@@ -39,6 +39,8 @@ void RegisterWindow(const std::string& name, bool open,
 void RegisterMenu(const std::string& name,
   Function function);
 void RegisterPopup(const std::string& name, bool modal, Function function);
+void OpenPopup(const std::string& name);
+void ClosePopup();
 void ToggleWindow(const std::string& name);
 void SetWindowState(const std::string& name, bool open);
 WindowInformation& GetWindowInfo(const std::string& name);
