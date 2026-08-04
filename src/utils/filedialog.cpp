@@ -3,7 +3,10 @@
 #include <string>
 #include <vector>
 #include <utility>
+
+#ifdef _WIN32 
 #include <Windows.h>
+#endif
 
 std::string OpenFileDialog(const std::vector<std::string>& filters, std::string delimiter) {
   NFD_Init();
@@ -108,6 +111,12 @@ std::string OpenDirectoryDialog() {
   return outStr;
 }
 
+#ifdef _WIN32
 void OpenPath(const std::string& path) {
   ShellExecute(NULL, "open", path.c_str(), NULL, NULL, SW_SHOWDEFAULT);
 }
+#endif
+#ifndef _WIN32
+void OpenPath(const std::string& path){
+}
+#endif

@@ -4,7 +4,10 @@
 #include <utility>
 #include <chrono>
 #include <algorithm>
+
+#ifdef _WIN32
 #include <Windows.h>
+#endif
 
 using namespace std::chrono;
 
@@ -35,6 +38,7 @@ std::string get_user () {
   return to_lower(std::getenv("USERNAME"));
 }
 
+#ifdef _WIN32
 static bool s_CanDecodeAsCodepage (const std::vector<unsigned char>& bytes, UINT codePage) {
   if (bytes.empty()) return true;
 
@@ -104,4 +108,14 @@ std::string from_utf8 (const std::string& utf8) {
 
   return ansi;
 }
-
+#endif
+#ifndef _WIN32
+std::string to_utf8 (const std::string& content) {
+    // TODO: Implement unix solution
+    return content;
+}
+std::string from_utf8(const std::string& utf8){
+    // TODO: Implement unix solution
+    return utf8;
+}
+#endif
