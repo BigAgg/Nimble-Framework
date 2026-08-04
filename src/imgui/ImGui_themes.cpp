@@ -18,7 +18,7 @@ static ImVec4 MixColor(const ImVec4& a, const ImVec4& b, float t) {
 static void ApplyTableColors(const ImVec4& surface, const ImVec4& accent, bool dark) {
     ImVec4* colors = ImGui::GetStyle().Colors;
 
-    ImVec4 headerBg     = MixColor(surface, accent, dark ? 0.70f : 0.78f);
+    ImVec4 headerBg     = MixColor(surface, accent, dark ? 0.10f : 0.18f);
     ImVec4 borderStrong = MixColor(surface, accent, dark ? 0.50f : 0.55f);
     ImVec4 borderLight  = MixColor(surface, accent, dark ? 0.18f : 0.22f);
     headerBg.w = borderStrong.w = borderLight.w = 1.00f;  // tables want opaque
@@ -757,7 +757,6 @@ void ThemeNimbleDark() {
     colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.70f);
 
     ApplyNimbleShape();
-    ApplyTableColors(panel, accent, true);
 }
 
 void ThemeGoldDark() {
