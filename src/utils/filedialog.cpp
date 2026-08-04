@@ -4,10 +4,6 @@
 #include <vector>
 #include <utility>
 
-#ifdef _WIN32 
-#include <Windows.h>
-#endif
-
 std::string OpenFileDialog(const std::vector<std::string>& filters, std::string delimiter) {
   NFD_Init();
   nfdu8char_t* outPath;
@@ -111,12 +107,32 @@ std::string OpenDirectoryDialog() {
   return outStr;
 }
 
-#ifdef _WIN32
+// Windows implementation of opening a path
+#if defined(_WIN32)
+
+#include <Windows.h>
+
 void OpenPath(const std::string& path) {
   ShellExecute(NULL, "open", path.c_str(), NULL, NULL, SW_SHOWDEFAULT);
 }
+
+// Apple and unix implementation of opening a path
+#elif defined(__APPLE__) || defined(__linux__)
+
+#include <unistd.h>
+#include <sys/types.h>
+
+void OpenPath(const std::string& path) {
+  pid_t pid = fork();
+
+  if (pid == 0) {
+#if defined(__APPLE__)
+    execlp("open", "open", path.c_str(), (char*)nullptr);
+#else
+    execlp("xdg-open", "xdg-open", path.c_str(), (char*)nullptr);
 #endif
-#ifndef _WIN32
-void OpenPath(const std::string& path){
+    _exit(1); // execlp failed
+  }
 }
+
 #endif

@@ -39,41 +39,97 @@ std::string get_user () {
 }
 
 #ifdef _WIN32
-static bool s_CanDecodeAsCodepage (const std::vector<unsigned char>& bytes, UINT codePage) {
-  if (bytes.empty()) return true;
+static bool s_IsValidUTF8(const std::string& str)
+{
+  if (str.empty())
+    return true;
 
-  int result = MultiByteToWideChar(
-      codePage,
-      MB_ERR_INVALID_CHARS,
-      reinterpret_cast<LPCCH>(bytes.data()),
-      static_cast<int>(bytes.size()),
-      nullptr,
-      0);
-  return result > 0;
+  return MultiByteToWideChar(
+    CP_UTF8,
+    MB_ERR_INVALID_CHARS,
+    str.data(),
+    static_cast<int>(str.size()),
+    nullptr,
+    0) > 0;
 }
-std::string to_utf8 (const std::string& content) {
-  std::string out = content;
+
+static bool s_CanDecodeAsCodepage(const std::vector<unsigned char>& bytes, UINT codePage)
+{
+  if (bytes.empty())
+    return true;
+
+  return MultiByteToWideChar(
+    codePage,
+    MB_ERR_INVALID_CHARS,
+    reinterpret_cast<LPCCH>(bytes.data()),
+    static_cast<int>(bytes.size()),
+    nullptr,
+    0) > 0;
+}
+
+std::string to_utf8(const std::string& content)
+{
+  if (content.empty())
+    return {};
+
+  // Already UTF-8? Leave it alone.
+  if (s_IsValidUTF8(content))
+    return content;
+
+  // Not UTF-8. Can we interpret it as the current ANSI code page?
   std::vector<unsigned char> bytes(content.begin(), content.end());
   if (!s_CanDecodeAsCodepage(bytes, GetACP()))
-    return out;
-  if (content.empty())
-    return out;
+    return content;
+
   // ANSI -> UTF-16
-  int wlen = MultiByteToWideChar(CP_ACP, 0, out.data(), (int)out.size(), nullptr, 0);
-  std::wstring wstr(wlen, L'\0');
-  MultiByteToWideChar(CP_ACP, 0,
-                      out.data(), (int)out.size(),
-                      &wstr[0], wlen);
+  int wlen = MultiByteToWideChar(
+    CP_ACP,
+    MB_ERR_INVALID_CHARS,
+    content.data(),
+    static_cast<int>(content.size()),
+    nullptr,
+    0);
+
+  if (wlen <= 0)
+    return content;
+
+  std::wstring wide(wlen, L'\0');
+
+  MultiByteToWideChar(
+    CP_ACP,
+    MB_ERR_INVALID_CHARS,
+    content.data(),
+    static_cast<int>(content.size()),
+    wide.data(),
+    wlen);
 
   // UTF-16 -> UTF-8
-  int u8len = WideCharToMultiByte(CP_UTF8, 0,
-                                  wstr.data(), (int)wstr.size(),
-                                  nullptr, 0, nullptr, nullptr);
-  std::string u8(u8len, '\0');
-  WideCharToMultiByte(CP_UTF8, 0,
-                      wstr.data(), (int)wstr.size(),
-                      &u8[0], u8len, nullptr, nullptr);
-  return u8;
+  int u8len = WideCharToMultiByte(
+    CP_UTF8,
+    0,
+    wide.data(),
+    wlen,
+    nullptr,
+    0,
+    nullptr,
+    nullptr);
+
+  if (u8len <= 0)
+    return content;
+
+  std::string utf8(u8len, '\0');
+
+  WideCharToMultiByte(
+    CP_UTF8,
+    0,
+    wide.data(),
+    wlen,
+    utf8.data(),
+    u8len,
+    nullptr,
+    nullptr);
+
+  return utf8;
 }
 
 std::string from_utf8 (const std::string& utf8) {
@@ -108,14 +164,13 @@ std::string from_utf8 (const std::string& utf8) {
 
   return ansi;
 }
-#endif
-#ifndef _WIN32
+#elif defined(__linux__) || defined(__APPLE__)
+
 std::string to_utf8 (const std::string& content) {
-    // TODO: Implement unix solution
     return content;
 }
 std::string from_utf8(const std::string& utf8){
-    // TODO: Implement unix solution
     return utf8;
 }
+
 #endif
