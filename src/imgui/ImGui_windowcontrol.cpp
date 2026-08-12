@@ -9,6 +9,7 @@
 #include <utility>
 #include <unordered_map>
 #include <map>
+#include <vector>
 
 class WindowControl {
 public:
@@ -19,9 +20,10 @@ public:
   std::unordered_map<std::string, WindowInformation> registry;
   std::unordered_map<std::string, PopupInformation> popupRegistry;
   std::pair<std::string, PopupInformation> openedPopup;
-  std::map<std::string, Function> menuBarRegistry;
+  //std::map<std::string, Function> menuBarRegistry;
+  std::map<std::string, std::map<std::string, std::vector<Function>>> menuBarRegistry;
   std::string selectedWindow;
-  unsigned char theme = 0;
+  unsigned char theme = NIMBLE_LIGHT;
   bool editFlagsOpen = false;
   bool themeSelectOpen = false;
   bool windowToggleOpen = false;
@@ -55,21 +57,35 @@ void RegisterWindow(const std::string& name, bool open,
   wc.registry[name] = std::move(wi);
 }
 
-void RegisterMenu(const std::string& name,
-                                 Function function) {
+void RegisterMenu(const std::string& name) {
   auto& wc = WindowControl::Get();
   auto it = wc.menuBarRegistry.find(name);
-  assert(it == wc.menuBarRegistry.end() &&
-         "There is already a Menu registered with the same name!");
-  wc.menuBarRegistry[name] = function;
+  if (it != wc.menuBarRegistry.end()) {
+    LOG_THROW("There is already a menu registered with the same name: %s", name.c_str());
+  }
+  wc.menuBarRegistry[name] = {};
+}
+
+void RegisterSubmenu(const std::string menu, const std::string& name, Function function){
+  auto& wc = WindowControl::Get();
+  auto it = wc.menuBarRegistry.find(menu);
+  if (it == wc.menuBarRegistry.end())
+    RegisterMenu(menu);
+  wc.menuBarRegistry[menu][name].push_back(function);
 }
 
 void RegisterPopup (const std::string& name, bool modal, Function function) {
   auto& wc = WindowControl::Get();
-  assert(function && "nullptr Function for popup is not allowed");
-  assert(!name.empty() && "Empty name is not allowed");
+  if (!function) {
+    LOG_THROW("nullptr Function for popup is not allowed: %s", name.c_str());
+  }
+  if (name.empty()) {
+    LOG_THROW("Empty name is not allowed!");
+  }
   auto it = wc.popupRegistry.find(name);
-  assert(it == wc.popupRegistry.end() && "There is already a Popup registered with the same name!");
+  if (it != wc.popupRegistry.end()) {
+    LOG_THROW("There is already a Popup registered with the same name: %s", name.c_str());
+  }
   wc.popupRegistry[name] = PopupInformation(modal, function);
 }
 
@@ -150,22 +166,37 @@ void DrawWindows() {
 void DrawMainMenu() {
   auto& wc = WindowControl::Get();
   ImGui::BeginMainMenuBar();
-  for (const auto& [name, function] : wc.menuBarRegistry) {
-    if (ImGui::BeginMenu(name.c_str())) {
-      function();
+  for (const auto& [menu, submenus] : wc.menuBarRegistry) {
+    if (ImGui::BeginMenu(menu.c_str())) {
+      for (const auto& [name, submenu] : submenus) {
+        if (name.empty()) {
+          for (const auto& menu : submenu) {
+						menu();
+						ImGui::Separator();
+          }
+          continue;
+        }
+        if (ImGui::BeginMenu(name.c_str())) {
+          for (const auto& menu : submenu) {
+            menu();
+            ImGui::Separator();
+          }
+          ImGui::EndMenu();
+        }
+      }
       ImGui::EndMenu();
     }
   }
-  if (ImGui::BeginMenu("Windows")) {
-    if (ImGui::BeginMenu("Edit Window Flags")) {
+  if (ImGui::BeginMenu("Fenster")) {
+    if (ImGui::BeginMenu("Verhalten")) {
       EditWindowFlags();
       ImGui::EndMenu();
     }
-    if (ImGui::BeginMenu("Toggle Window")) {
+    if (ImGui::BeginMenu("Ein/-Ausschalten")) {
       ToggleWindow();
       ImGui::EndMenu();
     }
-    if (ImGui::BeginMenu("Select Theem")) {
+    if (ImGui::BeginMenu("Farbschema")) {
       ThemeSelector();
       ImGui::EndMenu();
     }
@@ -185,8 +216,8 @@ void ToggleWindow() {
 
 void ThemeSelector() {
   auto& wc = WindowControl::Get();
-  if (ImGui::BeginMenu("Light Themes")) {
-    if (ImGui::Button("Normal")) {
+  if (ImGui::BeginMenu("Hell")) {
+    if (ImGui::Button("Blau")) {
       SetTheme(LIGHT);
       wc.theme = LIGHT;
     }
@@ -210,10 +241,14 @@ void ThemeSelector() {
       SetTheme(NIMBLE_LIGHT);
       wc.theme = NIMBLE_LIGHT;
     }
+    if (ImGui::Button("Modern")) {
+      SetTheme(MODERN_LIGHT);
+      wc.theme = MODERN_LIGHT;
+    }
     ImGui::EndMenu();
   }
-  if (ImGui::BeginMenu("Dark Themes")) {
-    if (ImGui::Button("Normal")) {
+  if (ImGui::BeginMenu("Dunkel")) {
+    if (ImGui::Button("Blau")) {
       SetTheme(DARK);
       wc.theme = DARK;
     }
@@ -237,13 +272,17 @@ void ThemeSelector() {
       SetTheme(NIMBLE_DARK);
       wc.theme = NIMBLE_DARK;
     }
+    if (ImGui::Button("Modern")) {
+      SetTheme(MODERN_DARK);
+      wc.theme = MODERN_DARK;
+    }
     ImGui::EndMenu();
   }
 }
 
 void EditWindowFlags() {
   auto& wc = WindowControl::Get();
-  if (ImGui::BeginCombo("Fenster Auswahl", wc.selectedWindow.c_str())) {
+  if (ImGui::BeginCombo("Fensterauswahl", wc.selectedWindow.c_str())) {
     for (const auto& [name, wi] : wc.registry) {
       if (!wi.function || !wi.open)
         continue;
@@ -259,40 +298,44 @@ void EditWindowFlags() {
   }
 
   auto& wi = it->second;
-  ImGui::SeparatorText("Window Flags");
-  CheckboxFlags("No Title Bar", &wi.flags, ImGuiWindowFlags_NoTitleBar);
-  CheckboxFlags("No Resize", &wi.flags, ImGuiWindowFlags_NoResize);
-  CheckboxFlags("No Move", &wi.flags, ImGuiWindowFlags_NoMove);
-  CheckboxFlags("No Scrollbar", &wi.flags, ImGuiWindowFlags_NoScrollbar);
-  CheckboxFlags("No Scroll With Mouse", &wi.flags,
+  ImGui::SeparatorText("Fenstereigenschaften");
+  CheckboxFlags("Keine Titelbar", &wi.flags, ImGuiWindowFlags_NoTitleBar);
+  CheckboxFlags("Feste Größe", &wi.flags, ImGuiWindowFlags_NoResize);
+  CheckboxFlags("Feste Position", &wi.flags, ImGuiWindowFlags_NoMove);
+  CheckboxFlags("Keine Scrollbar", &wi.flags, ImGuiWindowFlags_NoScrollbar);
+  CheckboxFlags("Kein Scrollen mit Maus", &wi.flags,
                 ImGuiWindowFlags_NoScrollWithMouse);
-  CheckboxFlags("No Collapse", &wi.flags, ImGuiWindowFlags_NoCollapse);
-  CheckboxFlags("Always Auto Resize", &wi.flags,
+  CheckboxFlags("Kein verkleinern", &wi.flags, ImGuiWindowFlags_NoCollapse);
+  CheckboxFlags("Automatische Größe", &wi.flags,
                 ImGuiWindowFlags_AlwaysAutoResize);
-  CheckboxFlags("No Background", &wi.flags, ImGuiWindowFlags_NoBackground);
-  CheckboxFlags("No Saved Settings", &wi.flags,
+  CheckboxFlags("Kein Hintergrund", &wi.flags, ImGuiWindowFlags_NoBackground);
+  CheckboxFlags("Keine gespeicherten Einstellungen", &wi.flags,
                 ImGuiWindowFlags_NoSavedSettings);
-  CheckboxFlags("No Mouse Inputs", &wi.flags,
+  CheckboxFlags("Keine Mauseingaben", &wi.flags,
                 ImGuiWindowFlags_NoMouseInputs);
   CheckboxFlags("Menu Bar", &wi.flags, ImGuiWindowFlags_MenuBar);
-  CheckboxFlags("Horizontal Scrollbar", &wi.flags,
+  CheckboxFlags("Horizontale Scrollbar", &wi.flags,
                 ImGuiWindowFlags_HorizontalScrollbar);
-  CheckboxFlags("No Focus On Appearing", &wi.flags,
+  CheckboxFlags("Kein Fokus beim Erscheinen", &wi.flags,
                 ImGuiWindowFlags_NoFocusOnAppearing);
-  CheckboxFlags("No Bring to Front On Focus", &wi.flags,
+  CheckboxFlags("Kein nach vorne bringen beim Fokusieren", &wi.flags,
                 ImGuiWindowFlags_NoBringToFrontOnFocus);
-  CheckboxFlags("Always Vertical Scrollbar", &wi.flags,
+  CheckboxFlags("Immer vertikale Scrollbar", &wi.flags,
                 ImGuiWindowFlags_AlwaysVerticalScrollbar);
-  CheckboxFlags("Always Horizontal Scrollbar", &wi.flags,
+  CheckboxFlags("Immer Horizontale Scrollbar", &wi.flags,
                 ImGuiWindowFlags_AlwaysHorizontalScrollbar);
-  CheckboxFlags("No Nav Inputs", &wi.flags, ImGuiWindowFlags_NoNavInputs);
-  CheckboxFlags("No Nav Focus", &wi.flags, ImGuiWindowFlags_NoNavFocus);
-  CheckboxFlags("Unsaved Document", &wi.flags,
+  CheckboxFlags("Keine Navigationseingaben", &wi.flags, ImGuiWindowFlags_NoNavInputs);
+  CheckboxFlags("Kein Navigationsfokus", &wi.flags, ImGuiWindowFlags_NoNavFocus);
+  ImGui::BeginDisabled();
+  CheckboxFlags("Ungespeicherted Dokument", &wi.flags,
                 ImGuiWindowFlags_UnsavedDocument);
-  CheckboxFlags("No Docking", &wi.flags, ImGuiWindowFlags_NoDocking);
-  CheckboxFlags("No Nav", &wi.flags, ImGuiWindowFlags_NoNav);
-  CheckboxFlags("No Decoration", &wi.flags, ImGuiWindowFlags_NoDecoration);
-  CheckboxFlags("No Inputs", &wi.flags, ImGuiWindowFlags_NoInputs);
+  ImGui::EndDisabled();
+  CheckboxFlags("Kein Docking/Snapping", &wi.flags, ImGuiWindowFlags_NoDocking);
+  CheckboxFlags("Keine Navigation", &wi.flags, ImGuiWindowFlags_NoNav);
+  CheckboxFlags("Keine Dekoration", &wi.flags, ImGuiWindowFlags_NoDecoration);
+  ImGui::BeginDisabled();
+  CheckboxFlags("Keine Eingaben", &wi.flags, ImGuiWindowFlags_NoInputs);
+  ImGui::EndDisabled();
 }
 
 static void CheckboxFlags(const char* label, int* flags,

@@ -36,8 +36,8 @@ struct WindowInformation {
 
 void RegisterWindow(const std::string& name, bool open,
   Function function, int flags = 0);
-void RegisterMenu(const std::string& name,
-  Function function);
+void RegisterMenu(const std::string& name);
+void RegisterSubmenu(const std::string menu, const std::string& name, Function function);
 void RegisterPopup(const std::string& name, bool modal, Function function);
 void OpenPopup(const std::string& name);
 void ClosePopup();

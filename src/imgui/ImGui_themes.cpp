@@ -1,4 +1,6 @@
 #include "imgui/ImGui_themes.h"
+#include "imgui/modern/ImGui_modern_palettes.h"
+#include "imgui/modern/ImGui_modern_theme.h"
 #include <imgui.h>
 
 // Linear interpolation between two colors, t = 0 returns a, t = 1 returns b.
@@ -18,7 +20,7 @@ static ImVec4 MixColor(const ImVec4& a, const ImVec4& b, float t) {
 static void ApplyTableColors(const ImVec4& surface, const ImVec4& accent, bool dark) {
     ImVec4* colors = ImGui::GetStyle().Colors;
 
-    ImVec4 headerBg     = MixColor(surface, accent, dark ? 0.10f : 0.18f);
+    ImVec4 headerBg     = MixColor(surface, accent, dark ? 0.85f : 0.93f);
     ImVec4 borderStrong = MixColor(surface, accent, dark ? 0.50f : 0.55f);
     ImVec4 borderLight  = MixColor(surface, accent, dark ? 0.18f : 0.22f);
     headerBg.w = borderStrong.w = borderLight.w = 1.00f;  // tables want opaque
@@ -31,47 +33,57 @@ static void ApplyTableColors(const ImVec4& surface, const ImVec4& accent, bool d
                                               : ImVec4(0.00f, 0.00f, 0.00f, 0.045f);
 }
 
+// Every scheme is served by its modern palette (imgui/modern/): same colors and
+// the same names in the menu, but with the elevation, spacing and depth of the
+// modern themes instead of the flat mapping below. The classic Theme*()
+// functions are kept intact and can still be called directly.
 void SetTheme(Themes theme) {
 	switch (theme) {
 	case Themes::LIGHT:
-		ImGui::StyleColorsLight();
+		ThemeModernBlueLight();
 		break;
 	case Themes::DARK:
-		ImGui::StyleColorsDark();
+		ThemeModernBlueDark();
 		break;
 	case Themes::GOLD_DARK:
-		ThemeGoldDark();
+		ThemeModernGoldDark();
 		break;
 	case Themes::PURPLE_LIGHT:
-		ThemePurpleLight();
+		ThemeModernPurpleLight();
 		break;
 	case Themes::PURPLE_DARK:
-		ThemePurpleDark();
+		ThemeModernPurpleDark();
 		break;
-    case Themes::GIRLY_PINK:
-	    ThemeGirlyPink();
-	    break;
+	case Themes::GIRLY_PINK:
+		ThemeModernGirlyPink();
+		break;
 	case Themes::NOCTUA_LIGHT:
-		ThemeNoctuaLight();
+		ThemeModernNoctuaLight();
 		break;
 	case Themes::NOCTUA_DARK:
-		ThemeNoctuaDark();
+		ThemeModernNoctuaDark();
 		break;
-    case Themes::ROSEPINE_LIGHT:
-        ThemeRosePineLight();
-        break;
-    case Themes::ROSEPINE_DARK:
-        ThemeRosePineDark();
-        break;
-    case Themes::NIMBLE_LIGHT:
-        ThemeNimbleLight();
-        break;
-    case Themes::NIMBLE_DARK:
-        ThemeNimbleDark();
-        break;
+	case Themes::ROSEPINE_LIGHT:
+		ThemeModernRosePineLight();
+		break;
+	case Themes::ROSEPINE_DARK:
+		ThemeModernRosePineDark();
+		break;
+	case Themes::NIMBLE_LIGHT:
+		ThemeModernNimbleLight();
+		break;
+	case Themes::NIMBLE_DARK:
+		ThemeModernNimbleDark();
+		break;
+	case Themes::MODERN_LIGHT:
+		ThemeModernLight();
+		break;
+	case Themes::MODERN_DARK:
+		ThemeModernDark();
+		break;
 	case Themes::GOLD_LIGHT:
 	default:
-		ThemeGoldLight();
+		ThemeModernGoldLight();
 		break;
 	}
 }
