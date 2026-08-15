@@ -11,13 +11,20 @@
 #include <map>
 #include <vector>
 
+struct DockContainer {
+  std::unordered_map<std::string, WindowInformation> registry;
+  ImGuiWindowFlags flags;
+};
+
 class WindowControl {
 public:
   static WindowControl& Get() {
     static WindowControl instance;
     return instance;
   }
-  std::unordered_map<std::string, WindowInformation> registry;
+  std::map<std::string, DockContainer> dockregistry;
+  std::string activedockspace;
+  std::vector<std::string> docknames;
   std::unordered_map<std::string, PopupInformation> popupRegistry;
   std::pair<std::string, PopupInformation> openedPopup;
   //std::map<std::string, Function> menuBarRegistry;
@@ -41,9 +48,37 @@ private:
 
 static void CheckboxFlags(const char* label, int* flags, int flag);
 
+void RegisterDock(const std::string& name, int flags){
+  auto& wc = WindowControl::Get();
+  auto it = wc.dockregistry.find(name);
+  if (it != wc.dockregistry.end()) {
+    LOG_WARNING("Dock does already exist %s", name.c_str());
+    return;
+  }
+  wc.dockregistry[name] = { {}, flags };
+  wc.docknames.push_back(name);
+  LOG_INFO("Registered Dock %s with flags %d", name.c_str(), flags);
+}
+
+void SetDockspace(const std::string& name) {
+  auto& wc = WindowControl::Get();
+  auto it = wc.dockregistry.find(name);
+  if (it == wc.dockregistry.end()) {
+    LOG_WARNING("Dock is not registered %s", name.c_str());
+    return;
+  }
+  wc.activedockspace = name;
+}
+
+std::vector<std::string> DockNames(){
+  auto& wc = WindowControl::Get();
+  return wc.docknames;
+}
+
 void RegisterWindow(const std::string& name, bool open,
                                    Function function,
                                    int flags) {
+  /*
   auto& wc = WindowControl::Get();
   auto it = wc.registry.find(name);
   if (it != wc.registry.end()) {
@@ -55,6 +90,36 @@ void RegisterWindow(const std::string& name, bool open,
   wi.function = function;
   wi.flags = flags;
   wc.registry[name] = std::move(wi);
+  */
+  auto& wc = WindowControl::Get();
+  if (wc.activedockspace.empty())
+    return;
+  auto it = wc.dockregistry.find(wc.activedockspace);
+  if (it == wc.dockregistry.end()) {
+    LOG_WARNING("Active dockspace does not exist %s", wc.activedockspace.c_str());
+    return;
+  }
+  auto it2 = it->second.registry.find(name);
+  if (it2 != it->second.registry.end()) {
+    it2->second.function = function;
+    return;
+  }
+  WindowInformation wi;
+  wi.open = open;
+  wi.function = function;
+  wi.flags = flags;
+  it->second.registry[name] = std::move(wi);
+}
+
+void RegisterWindow(const std::string& dockspace, const std::string& name, bool open, Function function, int flags){
+  auto& wc = WindowControl::Get();
+  const std::string active = wc.activedockspace;
+  auto it = wc.dockregistry.find(dockspace);
+  if (it == wc.dockregistry.end())
+    RegisterDock(dockspace);
+  SetDockspace(dockspace);
+  RegisterWindow(name, open, function, flags);
+  SetDockspace(active);
 }
 
 void RegisterMenu(const std::string& name) {
@@ -107,16 +172,16 @@ void ClosePopup() {
 
 void ToggleWindow(const std::string& name) {
   auto& wc = WindowControl::Get();
-  auto it = wc.registry.find(name);
-  if (it == wc.registry.end())
+  auto it = wc.dockregistry[wc.activedockspace].registry.find(name);
+  if (it == wc.dockregistry[wc.activedockspace].registry.end())
     return;
   it->second.open = !it->second.open;
 }
 
 void SetWindowState(const std::string& name, bool open) {
   auto& wc = WindowControl::Get();
-  auto it = wc.registry.find(name);
-  if (it == wc.registry.end())
+  auto it = wc.dockregistry[wc.activedockspace].registry.find(name);
+  if (it == wc.dockregistry[wc.activedockspace].registry.end())
     return;
   it->second.open = open;
 }
@@ -124,8 +189,8 @@ void SetWindowState(const std::string& name, bool open) {
 WindowInformation& GetWindowInfo(const std::string& name) {
   auto& wc = WindowControl::Get();
   static WindowInformation wi;
-  auto it = wc.registry.find(name);
-  if (it == wc.registry.end())
+  auto it = wc.dockregistry[wc.activedockspace].registry.find(name);
+  if (it == wc.dockregistry[wc.activedockspace].registry.end())
     return wi;
   return it->second;
 }
@@ -153,19 +218,49 @@ void DrawWindows() {
     }
   }
   // Handle windows
-  for (auto& [name, wi] : wc.registry) {
-    if (!wi)
-      continue;
-    if (ImGui::Begin (name.c_str (), &wi.open, wi.flags | ImGuiWindowFlags_NoFocusOnAppearing)) {
-      wi.function();
-    }
-    ImGui::End();
-  }
+  auto it = wc.dockregistry.find(wc.activedockspace);
+  if (it == wc.dockregistry.end())
+    return;
+  std::string dockname = wc.activedockspace;
+  DockContainer dockinfo = wc.dockregistry[dockname];
+	ImGuiViewport* viewport = ImGui::GetMainViewport();
+	ImGui::SetNextWindowPos(viewport->WorkPos);
+	ImGui::SetNextWindowSize(viewport->WorkSize);
+	ImGui::SetNextWindowViewport(viewport->ID);
+
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+
+	ImGui::Begin(dockname.c_str(), nullptr, dockinfo.flags);
+	ImGui::PopStyleVar(2);
+
+	// Important: creates th docking node
+	ImGuiID dockspace_id = ImGui::GetID(dockname.c_str());
+	ImGui::DockSpace(dockspace_id, ImVec2(0, 0));
+	ImGui::End();
+	// Drawing windows related to this dockspace
+	for (auto& [name, wi] : dockinfo.registry) {
+		if (!wi)
+			continue;
+		if (ImGui::Begin(name.c_str(), &wi.open, wi.flags | ImGuiWindowFlags_NoFocusOnAppearing)) {
+			wi.function();
+		}
+		ImGui::End();
+	}
 }
 
 void DrawMainMenu() {
   auto& wc = WindowControl::Get();
   ImGui::BeginMainMenuBar();
+  if (ImGui::BeginMenu("Menü")) {
+    for (const auto& name : DockNames()) {
+      if (name == wc.activedockspace)
+        continue;
+      if (ImGui::Button(name.c_str(), ImVec2(300.0f, 0)))
+        SetDockspace(name);
+    }
+    ImGui::EndMenu();
+  }
   for (const auto& [menu, submenus] : wc.menuBarRegistry) {
     if (ImGui::BeginMenu(menu.c_str())) {
       for (const auto& [name, submenu] : submenus) {
@@ -207,7 +302,7 @@ void DrawMainMenu() {
 
 void ToggleWindow() {
   auto& wc = WindowControl::Get();
-  for (auto& [name, wi] : wc.registry) {
+  for (auto& [name, wi] : wc.dockregistry[wc.activedockspace].registry) {
     if (!wi.function)
       return;
     ImGui::Checkbox(name.c_str(), &wi.open);
@@ -283,17 +378,19 @@ void ThemeSelector() {
 void EditWindowFlags() {
   auto& wc = WindowControl::Get();
   if (ImGui::BeginCombo("Fensterauswahl", wc.selectedWindow.c_str())) {
-    for (const auto& [name, wi] : wc.registry) {
-      if (!wi.function || !wi.open)
-        continue;
-      bool selected = name == wc.selectedWindow;
-      if (ImGui::Selectable(name.c_str(), selected))
-        wc.selectedWindow = name;
+    for (const auto& [dockname, dockinfo] : wc.dockregistry) {
+			for (const auto& [name, wi] : dockinfo.registry) {
+				if (!wi.function || !wi.open)
+					continue;
+				bool selected = name == wc.selectedWindow;
+				if (ImGui::Selectable(name.c_str(), selected))
+					wc.selectedWindow = name;
+			}
     }
     ImGui::EndCombo();
   }
-  auto it = wc.registry.find(wc.selectedWindow);
-  if (it == wc.registry.end()) {
+  auto it = wc.dockregistry[wc.activedockspace].registry.find(wc.selectedWindow);
+  if (it == wc.dockregistry[wc.activedockspace].registry.end()) {
     return;
   }
 
@@ -360,13 +457,16 @@ void SaveWindowControlSettings() {
   file << "Theme=" << std::to_string(wc.theme) << "\n";
   file << "\n";
   // Saving each window settings
-  for (const auto& [name, wi] : wc.registry) {
-    if (!wi.function)
-      continue;
-    file << "[Window][" << name << "]\n";
-    file << "Flags=" << std::to_string(wi.flags) << "\n";
-    file << "Open=" << std::to_string(wi.open) << "\n";
-    file << "\n";
+  for (const auto& [dockname, dockinfo] : wc.dockregistry) {
+		for (const auto& [name, wi] : dockinfo.registry) {
+			if (!wi.function)
+				continue;
+			file << "[Window][" << name << "]\n";
+			file << "Flags=" << std::to_string(wi.flags) << "\n";
+			file << "Open=" << std::to_string(wi.open) << "\n";
+      file << "Dockspace=" << dockname << "\n";
+			file << "\n";
+		}
   }
   file.close();
 }
@@ -400,6 +500,7 @@ void LoadWindowControlSettings() {
       windowname.pop_back();
       bool open = false;
       int flags = 0;
+      std::string dockspace = "";
       while (!windowname.empty() && std::getline(file, line) &&
              !line.empty()) {
         if (line.back() == '\r')
@@ -409,9 +510,11 @@ void LoadWindowControlSettings() {
           open = static_cast<bool>(std::stoi(value));
         else if (name == "Flags")
           flags = std::stoi(value);
+        else if (name == "Dockspace")
+          dockspace = value;
       }
       if (!windowname.empty())
-        RegisterWindow(windowname, open, nullptr, flags);
+        RegisterWindow(dockspace, windowname, open, nullptr, flags);
     }
   }
   file.close();
