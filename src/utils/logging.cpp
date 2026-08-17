@@ -52,16 +52,71 @@ namespace logging {
 
 	namespace fs = std::filesystem;
 
+	/// Reduces what source_location gives us to just the function name.
+	///
+	/// MSVC returns the full decorated signature from __FUNCSIG__, so a log line
+	/// about a slow request arrives as three hundred characters of template
+	/// parameters with the message hidden at the end. GCC and Clang are shorter but
+	/// still print the return type and the whole parameter list.
+	///
+	/// The name sits between the last space before the argument list and the '('
+	/// that opens it. Scanning from the '(' backwards also skips over return types
+	/// that contain spaces, which is what makes "class std::basic_string<...>
+	/// __cdecl net::HttpClient::Send" collapse to "net::HttpClient::Send".
+	///
+	/// A lambda comes out as the function it was written in - GCC spells the whole
+	/// "ns::f()::<lambda(int)>::operator()" out, and the enclosing name is what a
+	/// reader needs to find the line anyway.
+	static std::string kurzerName(const char* signatur) {
+		const std::string_view voll{ signatur };
+
+		// Find the '(' that starts the parameter list, skipping any that appear
+		// inside template arguments of the return type.
+		std::size_t tiefe = 0;
+		std::size_t klammer = std::string_view::npos;
+		for (std::size_t i = 0; i < voll.size(); ++i) {
+			if (voll[i] == '<')
+				++tiefe;
+			else if (voll[i] == '>' && tiefe > 0)
+				--tiefe;
+			else if (voll[i] == '(' && tiefe == 0) {
+				klammer = i;
+				break;
+			}
+		}
+		if (klammer == std::string_view::npos)
+			return std::string{ voll };	// Not a signature we recognise; leave it.
+
+		// Walk back to the start of the qualified name, stopping at whatever
+		// separates it from the return type and calling convention.
+		std::size_t start = klammer;
+		tiefe = 0;
+		while (start > 0) {
+			const char c = voll[start - 1];
+			if (c == '>')
+				++tiefe;
+			else if (c == '<' && tiefe > 0)
+				--tiefe;
+			else if (tiefe == 0 && (c == ' ' || c == '*' || c == '&'))
+				break;
+			--start;
+		}
+
+		std::string_view name = voll.substr(start, klammer - start);
+		return name.empty() ? std::string{ voll } : std::string{ name };
+	}
+
 	void log(const std::string& type, const std::string& msg, const std::source_location& location) {
 		if (!loggingstarted)
 			return;
 		const std::string filename = std::filesystem::path(location.file_name()).filename().string();
+		const std::string funktion = kurzerName(location.function_name());
 		if (type == "[ERROR]") {
 			std::string fullMessage = strings::formatString(
 				"[%s:%u %s] %s",
 				filename.c_str(),
 				static_cast<unsigned>(location.line()),
-				location.function_name(),
+				funktion.c_str(),
 				msg.c_str()
 			);
 			std::cerr << strings::GetTimestamp() << "\t" << type << "\t" << fullMessage << "\n";
@@ -73,7 +128,7 @@ namespace logging {
 		else if (type == "[WARNING]") {
 			std::string fullMessage = strings::formatString(
 				"[%s] %s",
-				location.function_name(),
+				funktion.c_str(),
 				msg.c_str()
 			);
 			lastWarning = fullMessage;
@@ -96,7 +151,7 @@ namespace logging {
 				"[%s:%u %s] %s",
 				filename.c_str(),
 				static_cast<unsigned>(location.line()),
-				location.function_name(),
+				funktion.c_str(),
 				msg.c_str()
 			);
 			std::cerr << strings::GetTimestamp() << "\t" << type << "\t" << fullMessage << "\n";

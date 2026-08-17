@@ -52,7 +52,6 @@ void RegisterDock(const std::string& name, int flags){
   auto& wc = WindowControl::Get();
   auto it = wc.dockregistry.find(name);
   if (it != wc.dockregistry.end()) {
-    LOG_WARNING("Dock does already exist %s", name.c_str());
     return;
   }
   wc.dockregistry[name] = { {}, flags };
