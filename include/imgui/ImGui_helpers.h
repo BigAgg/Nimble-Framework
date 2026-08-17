@@ -7,7 +7,6 @@
 #include <filesystem>
 #include "utils/filedialog.h"
 #include <cstdarg>
-#include <ctime>
 
 namespace ImGui {
 inline void HelpMarker (const char* fmt, ...) {
@@ -40,7 +39,7 @@ inline void HelpMarkerColored (bool hightlight, const char* fmt, ...) {
 	}
 }
 
-bool IsCurrentWindowHovered() {
+inline bool IsCurrentWindowHovered() {
   // Get the current child window
   ImGuiWindow *child = ImGui::GetCurrentWindow();
   // Child window rectangle in absolute coordinates:
@@ -50,7 +49,7 @@ bool IsCurrentWindowHovered() {
   return ImGui::IsMouseHoveringRect(min, max);
 }
 
-void Filewalker (std::string& path, std::vector<std::string>& files) {
+inline void Filewalker (std::string& path, std::vector<std::string>& files) {
   namespace fs = std::filesystem;
   if (path.empty())
     return;
@@ -96,8 +95,17 @@ void Filewalker (std::string& path, std::vector<std::string>& files) {
 #define IMGUI_DATEPICKER_YEAR_MAX 3000
 #endif // !IMGUI_DATEPICKER_YEAR_MAX
 
-IMGUI_API bool DatePickerEx(const std::string& label, std::string& date, ImFont* altFont, bool clampToBorder = false, float itemSpacing = 130.0f, float width = 170.0f);
+/// Date field with a calendar popup.
+///
+/// `date` is read and written in `format` (strftime/get_time syntax). The default
+/// is the German notation; pass "%Y-%m-%d" for the ISO form an API speaks.
+///
+/// Sizes follow the current style: pass `width = 0.0f` to have the field measured
+/// against the formatted date rather than a fixed pixel count, which is what keeps
+/// it in proportion when the theme or the font changes. `itemSpacing = 0.0f` puts
+/// the field directly after the label.
+IMGUI_API bool DatePickerEx(const std::string& label, std::string& date, ImFont* altFont, bool clampToBorder = false, float itemSpacing = 0.0f, float width = 0.0f, const char* format = "%d.%m.%Y");
 
-IMGUI_API bool DatePicker(const std::string& label, std::string& date, bool clampToBorder = false, float itemSpacing = 0.0f, float width = 170.0f);
+IMGUI_API bool DatePicker(const std::string& label, std::string& date, bool clampToBorder = false, float itemSpacing = 0.0f, float width = 0.0f, const char* format = "%d.%m.%Y");
 }
 

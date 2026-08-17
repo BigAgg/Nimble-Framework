@@ -133,13 +133,17 @@ namespace ImGui {
     return std::string(day + " " + month + " " + year);
   }
 
+  // Local time, not UTC: a calendar shows the day the user is having, and east of
+  // Greenwich after 22:00 those are not the same day.
   inline static tm Today() noexcept {
-    std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
-    std::time_t currentTime = std::chrono::system_clock::to_time_t(now);
+    const std::time_t currentTime = std::time(nullptr);
 
-    tm res;
-    gmtime_s(&res, &currentTime);
-
+    tm res{};
+#if defined(_WIN32)
+    localtime_s(&res, &currentTime);
+#else
+    localtime_r(&currentTime, &res);
+#endif
     return res;
   }
 
@@ -180,9 +184,10 @@ namespace ImGui {
   static bool ComboBox(const std::string& label, const std::vector<std::string>& items, int& v, ImFont* altFont) {
     bool res = false;
 
-    ImGui::PushFont(altFont);
+    if (altFont)
+      ImGui::PushFont(altFont);
     if (ImGui::BeginCombo(label.c_str(), items[v].c_str())) {
-      for (int i = 0; i < items.size(); ++i) {
+      for (int i = 0; i < static_cast<int>(items.size()); ++i) {
         bool selected = (items[v] == items[i]);
         if (ImGui::Selectable(items[i].c_str(), &selected)) {
           v = i;
@@ -196,22 +201,66 @@ namespace ImGui {
       ImGui::EndCombo();
     }
 
-    ImGui::PopFont();
+    if (altFont)
+      ImGui::PopFont();
     return res;
   }
 
-  bool DatePickerEx(const std::string& label, std::string& date, ImFont* altFont, bool clampToBorder, float itemSpacing, float width) {
-    static std::time_t t = std::time(nullptr);
-    static tm v{};
-    if(date.empty())
-      v = *std::localtime(&t);
-    else {
-      std::istringstream ss(date);
-      ss >> std::get_time(&v, "%d.%m.%Y");
-    }
+  // Everything the calendar needs to lay itself out, derived from the current
+  // style and font instead of the constants this widget used to carry.
+  //
+  // The old version hardcoded a 274.5 x 301.5 popup, 30 px columns and a 20 px
+  // corner radius. Those numbers describe one theme at one font size; change
+  // either and the popup clips its last week row or floats in empty space. None of
+  // them are free parameters - they all follow from the glyph size and the padding
+  // the theme already declares.
+  struct DatePickerMetrics {
+    float cellWidth = 0.0f;     // one day column, text plus frame padding
+    float cellHeight = 0.0f;    // one day button
+    float tableWidth = 0.0f;
+    float tableHeight = 0.0f;
+    ImVec2 popupSize{};
+    float fieldWidth = 0.0f;    // the closed combo showing the date
+  };
 
-    bool res = false;
+  static DatePickerMetrics CalcDatePickerMetrics(const char* sample) {
+    const ImGuiStyle& style = GetStyle();
+    DatePickerMetrics m;
 
+    // Widest thing a cell has to hold: a two digit day or a weekday abbreviation.
+    float widest = CalcTextSize("00").x;
+    for (const auto& day : DAYS)
+      widest = ImMax(widest, CalcTextSize(day.c_str()).x);
+
+    m.cellWidth = widest + style.FramePadding.x * 2.0f;
+    m.cellHeight = GetFrameHeight();
+
+    // Seven columns, each with cell padding on both sides, plus the outer border
+    // lines the table draws.
+    const float columnWidth = m.cellWidth + style.CellPadding.x * 2.0f;
+    m.tableWidth = columnWidth * 7.0f + 2.0f;
+
+    // Header row plus six week rows - six is the most any month can span, and
+    // sizing for the worst case keeps the popup from resizing as months change.
+    const float rowHeight = m.cellHeight + style.CellPadding.y * 2.0f;
+    m.tableHeight = rowHeight * 7.0f + 2.0f;
+
+    // Above the table sit the month/year row and the arrow row, each one frame
+    // high, separated by the theme's item spacing.
+    const float headerRows = GetFrameHeight() * 2.0f + style.ItemSpacing.y * 3.0f;
+
+    m.popupSize = ImVec2(
+      m.tableWidth + style.WindowPadding.x * 2.0f,
+      m.tableHeight + headerRows + style.WindowPadding.y * 2.0f);
+
+    // The closed field only has to fit the formatted date and the combo arrow.
+    m.fieldWidth = CalcTextSize(sample).x + style.FramePadding.x * 2.0f
+      + GetFrameHeight() + style.ItemInnerSpacing.x;
+
+    return m;
+  }
+
+  bool DatePickerEx(const std::string& label, std::string& date, ImFont* altFont, bool clampToBorder, float itemSpacing, float width, const char* format) {
     ImGuiWindow* window = GetCurrentWindow();
     if (window->SkipItems)
       return false;
@@ -219,18 +268,57 @@ namespace ImGui {
     bool hiddenLabel = label.substr(0, 2) == "##";
     std::string myLabel = (hiddenLabel) ? label.substr(2) : label;
 
+    const ImGuiID id = window->GetID(label.c_str());
+
+    // One calendar position per widget instead of one shared by all of them.
+    //
+    // This used to be a function-level static, which meant two date fields in the
+    // same window - a Beleg has Datum and Leistungsdatum - fought over a single
+    // tm: opening one picker moved the other, and an empty field reset whatever
+    // its neighbour was showing.
+    static std::unordered_map<ImGuiID, tm> states;
+
+    tm& v = states[id];
+
+    // Reparsed every frame so the calendar follows the string, which the caller
+    // may have changed since. An unparsable or empty value falls back to today
+    // rather than to whatever was left in the struct.
+    {
+      tm parsed{};
+      parsed.tm_isdst = -1;
+      std::istringstream ss(date);
+      ss >> std::get_time(&parsed, format);
+      if (ss.fail() || date.empty())
+        v = Today();
+      else
+        v = parsed;
+    }
+
+    bool res = false;
+
     if (!hiddenLabel) {
       Text("%s", label.c_str());
       SameLine((itemSpacing == 0.0f) ? 0.0f : GetCursorPos().x + itemSpacing);
     }
 
+    // Rendered once so the field is measured against the format actually in use -
+    // "31.12.2026" and "2026-12-31" are not the same width.
+    char sample[32];
+    {
+      tm probe = EncodeTimePoint(30, 12, 2026);
+      if (std::strftime(sample, sizeof(sample), format, &probe) == 0)
+        std::snprintf(sample, sizeof(sample), "00.00.0000");
+    }
+
+    const DatePickerMetrics m = CalcDatePickerMetrics(sample);
+
     if (clampToBorder)
       SetNextItemWidth(GetContentRegionAvail().x);
+    else
+      SetNextItemWidth(width > 0.0f ? width : m.fieldWidth);
 
-    const ImVec2 windowSize = ImVec2(274.5f, 301.5f);
-    SetNextWindowSize(windowSize);
+    SetNextWindowSize(m.popupSize);
 
-    ImGui::SetNextItemWidth(width);
     if (BeginCombo(std::string("##" + myLabel).c_str(), date.c_str())) {
       int monthIdx = GET_MONTH_UNSCALED(v);
       int year = GET_YEAR(v);
@@ -246,23 +334,27 @@ namespace ImGui {
       SameLine();
       PushItemWidth(GetContentRegionAvail().x);
 
-      if (InputInt(std::string("##IntYear_" + myLabel).c_str(), &year)) {
+      if (InputInt(std::string("##IntYear_" + myLabel).c_str(), &year, 0, 0)) {
         SET_YEAR(v, std::min(std::max(IMGUI_DATEPICKER_YEAR_MIN, year), IMGUI_DATEPICKER_YEAR_MAX));
         res = true;
       }
 
       PopItemWidth();
 
+      const ImGuiStyle& style = GetStyle();
       const float contentWidth = GetContentRegionAvail().x;
       const float arrowSize = GetFrameHeight();
-      const float arrowButtonWidth = arrowSize * 2.0f + GetStyle().ItemSpacing.x;
-      const float bulletSize = arrowSize - 5.0f;
-      const float bulletButtonWidth = bulletSize + GetStyle().ItemSpacing.x;
+      const float arrowButtonWidth = arrowSize * 2.0f + style.ItemSpacing.x;
+      // Proportional to the frame rather than a fixed 5 px smaller: on a large
+      // font the old bullet was a dot, on a small one it swallowed the arrows.
+      const float bulletSize = ImMax(arrowSize * 0.55f, 6.0f);
+      const float bulletButtonWidth = bulletSize + style.ItemSpacing.x;
       const float combinedWidth = arrowButtonWidth + bulletButtonWidth;
-      const float offset = (contentWidth - combinedWidth) * 0.5f;
+      const float offset = ImMax((contentWidth - combinedWidth) * 0.5f, 0.0f);
 
       SetCursorPosX(GetCursorPosX() + offset);
-      PushStyleVar(ImGuiStyleVar_FrameRounding, 20.0f);
+      // Half the height makes a circle at any size; a constant 20 only did at one.
+      PushStyleVar(ImGuiStyleVar_FrameRounding, arrowSize * 0.5f);
       PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
       PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
       BeginDisabled(IsMinDate(v));
@@ -276,13 +368,15 @@ namespace ImGui {
       PopStyleColor(2);
       SameLine();
       PushStyleColor(ImGuiCol_Button, GetStyleColorVec4(ImGuiCol_Text));
-      SetCursorPosY(GetCursorPosY() + 2.0f);
+      // Centred against the arrows, whatever the two heights happen to be.
+      SetCursorPosY(GetCursorPosY() + (arrowSize - bulletSize) * 0.5f);
 
       if (ButtonEx(std::string("##ArrowMid_" + myLabel).c_str(), ImVec2(bulletSize, bulletSize))) {
         v = Today();
         res = true;
         CloseCurrentPopup();
       }
+      SetItemTooltip("Heute");
 
       PopStyleColor();
       SameLine();
@@ -304,14 +398,16 @@ namespace ImGui {
 
       if (BeginTable(std::string("##Table_" + myLabel).c_str(), 7, TABLE_FLAGS, GetContentRegionAvail())) {
         for (const auto& day : DAYS)
-          TableSetupColumn(day.c_str(), ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoHeaderWidth, 30.0f);
+          TableSetupColumn(day.c_str(), ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoHeaderWidth, m.cellWidth);
 
         PushStyleColor(ImGuiCol_HeaderHovered, GetStyleColorVec4(ImGuiCol_TableHeaderBg));
         PushStyleColor(ImGuiCol_HeaderActive, GetStyleColorVec4(ImGuiCol_TableHeaderBg));
-        PushFont(altFont);
+        if (altFont)
+          PushFont(altFont);
         TableHeadersRow();
         PopStyleColor(2);
-        PopFont();
+        if (altFont)
+          PopFont();
 
         TableNextRow();
         TableSetColumnIndex(0);
@@ -321,23 +417,33 @@ namespace ImGui {
         int numDaysInMonth = NumDaysInMonth(month, year);
         int numWeeksInMonth = NumWeeksInMonth(month, year);
 
+        const tm heute = Today();
+        const bool sameMonth = (GET_MONTH(heute) == month) && (GET_YEAR(heute) == year);
+
         for (int i = 1; i <= numWeeksInMonth; ++i) {
           for (const auto& day : CalendarWeek(i, firstDayOfMonth, numDaysInMonth)) {
             if (day != 0) {
-              PushStyleVar(ImGuiStyleVar_FrameRounding, 20.0f);
+              PushStyleVar(ImGuiStyleVar_FrameRounding, m.cellHeight * 0.5f);
 
               const bool selected = day == GET_DAY(v);
               if (!selected) {
                 PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
                 PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
               }
+              // Today gets an outline when it is not the selected day, so the
+              // calendar answers "where am I" without a second glance.
+              const bool istHeute = sameMonth && (GET_DAY(heute) == day);
+              if (istHeute && !selected)
+                PushStyleColor(ImGuiCol_Border, GetStyleColorVec4(ImGuiCol_TextDisabled));
 
-              if (Button(std::to_string(day).c_str(), ImVec2(GetContentRegionAvail().x, GetTextLineHeightWithSpacing() + 5.0f))) {
+              if (Button(std::to_string(day).c_str(), ImVec2(GetContentRegionAvail().x, m.cellHeight))) {
                 v = EncodeTimePoint(day, month, year);
                 res = true;
                 CloseCurrentPopup();
               }
 
+              if (istHeute && !selected)
+                PopStyleColor();
               if (!selected)
                 PopStyleColor(2);
 
@@ -355,14 +461,14 @@ namespace ImGui {
       EndCombo();
     }
     if (res) {
-      char buffer[11];
-      std::strftime(buffer, sizeof(buffer), "%d.%m.%Y", &v);
-      date = std::string(buffer);
+      char buffer[32];
+      if (std::strftime(buffer, sizeof(buffer), format, &v) > 0)
+        date = std::string(buffer);
     }
     return res;
   }
 
-  bool DatePicker(const std::string& label, std::string& date, bool clampToBorder, float itemSpacing, float width) {
-    return DatePickerEx(label, date, nullptr, clampToBorder, itemSpacing, width);
+  bool DatePicker(const std::string& label, std::string& date, bool clampToBorder, float itemSpacing, float width, const char* format) {
+    return DatePickerEx(label, date, nullptr, clampToBorder, itemSpacing, width, format);
   }
 } // namespace ImGui
